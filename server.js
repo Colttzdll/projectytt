@@ -4,9 +4,14 @@ const ytdl = require('ytdl-core');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Desabilitar checagem de atualizações do ytdl-core
+process.env.YTDL_NO_UPDATE = '1';
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+
+const COOKIE = 'CONSENT=YES+; Path=/; Domain=.youtube.com;';
 
 app.get('/download', async (req, res) => {
     try {
@@ -23,13 +28,25 @@ app.get('/download', async (req, res) => {
 
         console.log('URL validada, obtendo informações do vídeo...');
         
-        const info = await ytdl.getBasicInfo(videoURL);
+        const info = await ytdl.getInfo(videoURL, {
+            requestOptions: {
+                headers: {
+                    cookie: COOKIE,
+                    'x-youtube-client-name': '1',
+                    'x-youtube-client-version': '2.20200101',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            }
+        });
+
         console.log('Informações do vídeo obtidas:', info.videoDetails.title);
 
         const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
         
-        const formats = ytdl.filterFormats(info.formats, 'audioonly');
-        const format = formats.find(f => f.audioBitrate >= 128) || formats[0];
+        const format = ytdl.chooseFormat(info.formats, { 
+            quality: 'highestaudio',
+            filter: 'audioonly' 
+        });
         
         if (!format) {
             return res.status(400).json({ error: 'Nenhum formato de áudio disponível' });
@@ -42,12 +59,12 @@ app.get('/download', async (req, res) => {
 
         const stream = ytdl(videoURL, {
             format: format,
-            filter: 'audioonly',
-            quality: 'highestaudio',
             requestOptions: {
                 headers: {
-                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    cookie: COOKIE,
+                    'x-youtube-client-name': '1',
+                    'x-youtube-client-version': '2.20200101',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                 }
             }
         });
@@ -55,12 +72,27 @@ app.get('/download', async (req, res) => {
         stream.on('error', (error) => {
             console.error('Erro no stream:', error);
             if (!res.headersSent) {
-                res.status(500).json({ error: 'Erro ao processar o vídeo' });
+                res.status(500).json({ 
+                    error: 'Erro ao processar o vídeo',
+                    details: error.message
+                });
             }
         });
 
         stream.on('info', (info, format) => {
             console.log('Stream iniciado:', format.container);
+        });
+
+        // Adiciona tratamento de timeout
+        const timeout = setTimeout(() => {
+            if (!res.headersSent) {
+                res.status(504).json({ error: 'Tempo limite excedido' });
+            }
+            stream.destroy();
+        }, 30000); // 30 segundos de timeout
+
+        stream.on('end', () => {
+            clearTimeout(timeout);
         });
 
         stream.pipe(res);
@@ -74,6 +106,11 @@ app.get('/download', async (req, res) => {
             });
         }
     }
+});
+
+// Rota de health check
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
 });
 
 app.listen(port, '0.0.0.0', () => {
