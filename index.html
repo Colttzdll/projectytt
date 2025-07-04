@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube to MP3 Converter</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div class="converter-box">
+            <h1 class="title">
+                <i class="fab fa-youtube"></i> YouTube to MP3
+            </h1>
+            <div class="input-group">
+                <input type="text" id="videoUrl" placeholder="Cole o link do YouTube aqui..." class="url-input">
+            </div>
+            <button id="convertBtn" class="convert-btn">
+                <span class="btn-text">Converter</span>
+                <div class="loading-spinner"></div>
+            </button>
+            <div id="status" class="status"></div>
+            <div id="downloadArea" class="download-area" style="display: none;">
+                <a id="downloadBtn" href="#" class="download-btn" target="_blank">
+                    <i class="fas fa-download"></i> Baixar MP3
+                </a>
+            </div>
+        </div>
+        <div class="features">
+            <div class="feature-item">
+                <i class="fas fa-bolt"></i>
+                <h3>Rápido</h3>
+                <p>Conversão instantânea</p>
+            </div>
+            <div class="feature-item">
+                <i class="fas fa-music"></i>
+                <h3>Alta Qualidade</h3>
+                <p>Melhor qualidade disponível</p>
+            </div>
+            <div class="feature-item">
+                <i class="fas fa-check-circle"></i>
+                <h3>Gratuito</h3>
+                <p>Sem limites</p>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html> 
