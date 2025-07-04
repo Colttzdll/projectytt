@@ -11,7 +11,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-const COOKIE = 'CONSENT=YES+; Path=/; Domain=.youtube.com;';
+// Cookies mais completos do YouTube
+const COOKIES = [
+    'CONSENT=YES+; Path=/; Domain=.youtube.com;',
+    'VISITOR_INFO1_LIVE=somevalue; Path=/; Domain=.youtube.com;',
+    'LOGIN_INFO=somevalue; Path=/; Domain=.youtube.com;',
+    'YSC=somevalue; Path=/; Domain=.youtube.com;',
+    'PREF=somevalue; Path=/; Domain=.youtube.com;'
+].join(' ');
 
 app.get('/download', async (req, res) => {
     try {
@@ -27,27 +34,35 @@ app.get('/download', async (req, res) => {
         }
 
         console.log('URL validada, obtendo informações do vídeo...');
-        
-        const info = await ytdl.getInfo(videoURL, {
+
+        // Opções para a requisição
+        const options = {
             requestOptions: {
                 headers: {
-                    cookie: COOKIE,
-                    'x-youtube-client-name': '1',
-                    'x-youtube-client-version': '2.20200101',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Connection': 'keep-alive',
+                    'Cookie': COOKIES
                 }
             }
-        });
+        };
 
+        // Primeiro tenta obter informações básicas
+        const videoId = ytdl.getVideoID(videoURL);
+        console.log('Video ID:', videoId);
+
+        const info = await ytdl.getBasicInfo(videoId, options);
         console.log('Informações do vídeo obtidas:', info.videoDetails.title);
 
         const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
-        
-        const format = ytdl.chooseFormat(info.formats, { 
-            quality: 'highestaudio',
-            filter: 'audioonly' 
-        });
-        
+
+        // Escolhe o melhor formato de áudio
+        const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+        const format = audioFormats.reduce((prev, curr) => {
+            return (curr.audioBitrate || 0) > (prev.audioBitrate || 0) ? curr : prev;
+        }, audioFormats[0]);
+
         if (!format) {
             return res.status(400).json({ error: 'Nenhum formato de áudio disponível' });
         }
@@ -56,17 +71,11 @@ app.get('/download', async (req, res) => {
         res.header('Content-Type', 'audio/mpeg');
 
         console.log('Iniciando download do áudio...');
+        console.log('Formato escolhido:', format.qualityLabel || format.audioBitrate + 'kbps');
 
-        const stream = ytdl(videoURL, {
-            format: format,
-            requestOptions: {
-                headers: {
-                    cookie: COOKIE,
-                    'x-youtube-client-name': '1',
-                    'x-youtube-client-version': '2.20200101',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }
-            }
+        const stream = ytdl(videoId, {
+            ...options,
+            format: format
         });
 
         stream.on('error', (error) => {
