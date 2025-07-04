@@ -23,23 +23,25 @@ const COOKIES = [
 // Função para verificar se o vídeo está disponível
 async function checkVideoAvailability(url) {
     try {
-        await youtubedl(url, {
+        const result = await youtubedl(url, {
             dumpSingleJson: true,
             noWarnings: true,
             noCallHome: true,
             noCheckCertificate: true,
             preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            extractAudio: true,
-            format: 'bestaudio'
+            addHeader: [
+                'referer:youtube.com',
+                'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ]
         });
+        console.log('Video info:', result);
         return { available: true };
     } catch (error) {
-        console.error('Erro ao verificar vídeo:', error.message);
+        console.error('Erro detalhado ao verificar vídeo:', error);
         if (error.message.includes('Video unavailable')) {
             return { 
                 available: false, 
-                error: 'Este vídeo não está disponível. Pode ser que ele seja privado ou tenha sido removido.'
+                error: 'Erro ao acessar o vídeo. Por favor, verifique se o vídeo está público e tente novamente.'
             };
         }
         if (error.message.includes('copyright')) {
@@ -50,7 +52,7 @@ async function checkVideoAvailability(url) {
         }
         return { 
             available: false, 
-            error: 'Erro ao verificar disponibilidade do vídeo. Tente outro vídeo.'
+            error: `Erro ao verificar disponibilidade do vídeo: ${error.message}`
         };
     }
 }
@@ -77,18 +79,22 @@ app.get('/download', async (req, res) => {
 
         console.log('URL validada, obtendo informações do vídeo...');
 
-        // Obtém informações do vídeo
+        // Obtém informações do vídeo com configurações atualizadas
         const videoInfo = await youtubedl(videoURL, {
             dumpSingleJson: true,
             noWarnings: true,
             noCallHome: true,
             noCheckCertificate: true,
             preferFreeFormats: true,
-            youtubeSkipDashManifest: true
+            addHeader: [
+                'referer:youtube.com',
+                'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ]
         });
 
         const title = videoInfo.title.replace(/[^\w\s]/gi, '');
         console.log('Título do vídeo:', title);
+        console.log('Informações do vídeo:', videoInfo);
 
         // Configura os headers da resposta
         res.header('Content-Disposition', `attachment; filename="${title}.mp3"`);
@@ -96,19 +102,22 @@ app.get('/download', async (req, res) => {
 
         console.log('Iniciando download do áudio...');
 
-        // Inicia o download do áudio
+        // Inicia o download do áudio com configurações atualizadas
         const download = youtubedl.exec(videoURL, {
             extractAudio: true,
             audioFormat: 'mp3',
-            audioQuality: 0, // 0 é a melhor qualidade
-            output: '-', // Output para stdout
+            audioQuality: 0,
+            output: '-',
             format: 'bestaudio',
-            quiet: true,
+            quiet: false, // Alterado para ver mais logs
             noWarnings: true,
             noCallHome: true,
             noCheckCertificate: true,
             preferFreeFormats: true,
-            youtubeSkipDashManifest: true
+            addHeader: [
+                'referer:youtube.com',
+                'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ]
         });
 
         // Pipe a saída do download para a resposta
@@ -117,19 +126,18 @@ app.get('/download', async (req, res) => {
         // Tratamento de erros durante o download
         download.stderr.on('data', (data) => {
             const errorMsg = data.toString();
-            console.error('Erro no download:', errorMsg);
+            console.error('Erro detalhado no download:', errorMsg);
             
-            // Se ainda não enviou resposta, envia erro
             if (!res.headersSent) {
                 let userError = 'Erro ao processar o vídeo';
                 
                 if (errorMsg.includes('copyright')) {
                     userError = 'Este vídeo não pode ser baixado devido a restrições de direitos autorais';
                 } else if (errorMsg.includes('unavailable')) {
-                    userError = 'Este vídeo não está mais disponível';
+                    userError = 'Erro ao acessar o vídeo. Por favor, verifique se o vídeo está público e tente novamente.';
                 }
                 
-                res.status(400).json({ error: userError });
+                res.status(400).json({ error: userError, details: errorMsg });
             }
         });
 
@@ -144,11 +152,12 @@ app.get('/download', async (req, res) => {
         // Limpa o timeout quando o download terminar
         download.stdout.on('end', () => {
             clearTimeout(timeout);
+            console.log('Download concluído com sucesso');
         });
 
         // Tratamento de erro no processo
         download.on('error', (error) => {
-            console.error('Erro no processo:', error);
+            console.error('Erro detalhado no processo:', error);
             if (!res.headersSent) {
                 res.status(500).json({ 
                     error: 'Erro ao processar o vídeo. Tente novamente mais tarde.',
@@ -158,14 +167,14 @@ app.get('/download', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro no servidor:', error);
+        console.error('Erro detalhado no servidor:', error);
         if (!res.headersSent) {
             let userError = 'Falha ao converter vídeo';
             
             if (error.message.includes('copyright')) {
                 userError = 'Este vídeo não pode ser baixado devido a restrições de direitos autorais';
             } else if (error.message.includes('unavailable')) {
-                userError = 'Este vídeo não está mais disponível';
+                userError = 'Erro ao acessar o vídeo. Por favor, verifique se o vídeo está público e tente novamente.';
             }
             
             res.status(500).json({ 
