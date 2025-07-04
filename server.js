@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const ytdl = require('ytdl-core');
+const youtubedl = require('youtube-dl-exec');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -29,57 +29,70 @@ app.get('/download', async (req, res) => {
             return res.status(400).json({ error: 'URL não fornecida' });
         }
 
-        if (!ytdl.validateURL(videoURL)) {
+        // Verifica se é uma URL do YouTube
+        if (!videoURL.includes('youtube.com') && !videoURL.includes('youtu.be')) {
             return res.status(400).json({ error: 'URL do YouTube inválida' });
         }
 
         console.log('URL validada, obtendo informações do vídeo...');
 
-        // Opções para a requisição
-        const options = {
-            requestOptions: {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Connection': 'keep-alive',
-                    'Cookie': COOKIES
-                }
-            }
-        };
+        // Obtém informações do vídeo
+        const videoInfo = await youtubedl(videoURL, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            noCheckCertificate: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true
+        });
 
-        // Primeiro tenta obter informações básicas
-        const videoId = ytdl.getVideoID(videoURL);
-        console.log('Video ID:', videoId);
+        const title = videoInfo.title.replace(/[^\w\s]/gi, '');
+        console.log('Título do vídeo:', title);
 
-        const info = await ytdl.getBasicInfo(videoId, options);
-        console.log('Informações do vídeo obtidas:', info.videoDetails.title);
-
-        const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
-
-        // Escolhe o melhor formato de áudio
-        const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
-        const format = audioFormats.reduce((prev, curr) => {
-            return (curr.audioBitrate || 0) > (prev.audioBitrate || 0) ? curr : prev;
-        }, audioFormats[0]);
-
-        if (!format) {
-            return res.status(400).json({ error: 'Nenhum formato de áudio disponível' });
-        }
-
+        // Configura os headers da resposta
         res.header('Content-Disposition', `attachment; filename="${title}.mp3"`);
         res.header('Content-Type', 'audio/mpeg');
 
         console.log('Iniciando download do áudio...');
-        console.log('Formato escolhido:', format.qualityLabel || format.audioBitrate + 'kbps');
 
-        const stream = ytdl(videoId, {
-            ...options,
-            format: format
+        // Inicia o download do áudio
+        const download = youtubedl.exec(videoURL, {
+            extractAudio: true,
+            audioFormat: 'mp3',
+            audioQuality: 0, // 0 é a melhor qualidade
+            output: '-', // Output para stdout
+            quiet: true,
+            noWarnings: true,
+            noCallHome: true,
+            noCheckCertificate: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true
         });
 
-        stream.on('error', (error) => {
-            console.error('Erro no stream:', error);
+        // Pipe a saída do download para a resposta
+        download.stdout.pipe(res);
+
+        // Tratamento de erros durante o download
+        download.stderr.on('data', (data) => {
+            console.error('Erro no download:', data.toString());
+        });
+
+        // Timeout de 5 minutos
+        const timeout = setTimeout(() => {
+            if (!res.headersSent) {
+                res.status(504).json({ error: 'Tempo limite excedido' });
+            }
+            download.kill();
+        }, 300000);
+
+        // Limpa o timeout quando o download terminar
+        download.stdout.on('end', () => {
+            clearTimeout(timeout);
+        });
+
+        // Tratamento de erro no processo
+        download.on('error', (error) => {
+            console.error('Erro no processo:', error);
             if (!res.headersSent) {
                 res.status(500).json({ 
                     error: 'Erro ao processar o vídeo',
@@ -87,24 +100,6 @@ app.get('/download', async (req, res) => {
                 });
             }
         });
-
-        stream.on('info', (info, format) => {
-            console.log('Stream iniciado:', format.container);
-        });
-
-        // Adiciona tratamento de timeout
-        const timeout = setTimeout(() => {
-            if (!res.headersSent) {
-                res.status(504).json({ error: 'Tempo limite excedido' });
-            }
-            stream.destroy();
-        }, 30000); // 30 segundos de timeout
-
-        stream.on('end', () => {
-            clearTimeout(timeout);
-        });
-
-        stream.pipe(res);
 
     } catch (error) {
         console.error('Erro no servidor:', error);
