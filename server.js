@@ -20,6 +20,41 @@ const COOKIES = [
     'PREF=somevalue; Path=/; Domain=.youtube.com;'
 ].join(' ');
 
+// Função para verificar se o vídeo está disponível
+async function checkVideoAvailability(url) {
+    try {
+        await youtubedl(url, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            noCheckCertificate: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            extractAudio: true,
+            format: 'bestaudio'
+        });
+        return { available: true };
+    } catch (error) {
+        console.error('Erro ao verificar vídeo:', error.message);
+        if (error.message.includes('Video unavailable')) {
+            return { 
+                available: false, 
+                error: 'Este vídeo não está disponível. Pode ser que ele seja privado ou tenha sido removido.'
+            };
+        }
+        if (error.message.includes('copyright')) {
+            return { 
+                available: false, 
+                error: 'Este vídeo não pode ser baixado devido a restrições de direitos autorais.'
+            };
+        }
+        return { 
+            available: false, 
+            error: 'Erro ao verificar disponibilidade do vídeo. Tente outro vídeo.'
+        };
+    }
+}
+
 app.get('/download', async (req, res) => {
     try {
         const videoURL = req.query.url;
@@ -32,6 +67,12 @@ app.get('/download', async (req, res) => {
         // Verifica se é uma URL do YouTube
         if (!videoURL.includes('youtube.com') && !videoURL.includes('youtu.be')) {
             return res.status(400).json({ error: 'URL do YouTube inválida' });
+        }
+
+        // Verifica disponibilidade do vídeo
+        const availability = await checkVideoAvailability(videoURL);
+        if (!availability.available) {
+            return res.status(400).json({ error: availability.error });
         }
 
         console.log('URL validada, obtendo informações do vídeo...');
@@ -61,6 +102,7 @@ app.get('/download', async (req, res) => {
             audioFormat: 'mp3',
             audioQuality: 0, // 0 é a melhor qualidade
             output: '-', // Output para stdout
+            format: 'bestaudio',
             quiet: true,
             noWarnings: true,
             noCallHome: true,
@@ -74,7 +116,21 @@ app.get('/download', async (req, res) => {
 
         // Tratamento de erros durante o download
         download.stderr.on('data', (data) => {
-            console.error('Erro no download:', data.toString());
+            const errorMsg = data.toString();
+            console.error('Erro no download:', errorMsg);
+            
+            // Se ainda não enviou resposta, envia erro
+            if (!res.headersSent) {
+                let userError = 'Erro ao processar o vídeo';
+                
+                if (errorMsg.includes('copyright')) {
+                    userError = 'Este vídeo não pode ser baixado devido a restrições de direitos autorais';
+                } else if (errorMsg.includes('unavailable')) {
+                    userError = 'Este vídeo não está mais disponível';
+                }
+                
+                res.status(400).json({ error: userError });
+            }
         });
 
         // Timeout de 5 minutos
@@ -95,7 +151,7 @@ app.get('/download', async (req, res) => {
             console.error('Erro no processo:', error);
             if (!res.headersSent) {
                 res.status(500).json({ 
-                    error: 'Erro ao processar o vídeo',
+                    error: 'Erro ao processar o vídeo. Tente novamente mais tarde.',
                     details: error.message
                 });
             }
@@ -104,8 +160,16 @@ app.get('/download', async (req, res) => {
     } catch (error) {
         console.error('Erro no servidor:', error);
         if (!res.headersSent) {
+            let userError = 'Falha ao converter vídeo';
+            
+            if (error.message.includes('copyright')) {
+                userError = 'Este vídeo não pode ser baixado devido a restrições de direitos autorais';
+            } else if (error.message.includes('unavailable')) {
+                userError = 'Este vídeo não está mais disponível';
+            }
+            
             res.status(500).json({ 
-                error: 'Falha ao converter vídeo',
+                error: userError,
                 details: error.message 
             });
         }
